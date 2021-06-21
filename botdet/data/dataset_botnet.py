@@ -1,7 +1,7 @@
 import os
 import os.path as osp
 import pickle
-
+import torch as ch
 import h5py
 import deepdish as dd
 import numpy as np
@@ -35,6 +35,7 @@ class BotnetDataset(Dataset):
             node features for the graph neural network models. Default: True.
         in_memory (bool, optional): whether to read all the graphs into memory; if not directly read from hard drive. Default: True.
         partial_load (list, optional): list of fields to load while opening hdf5 file
+        add_features_dgl (int, optional): length of feature vec (all 1s) to add to graph
     """
 
     # dataset home page at https://zenodo.org/record/3689089
@@ -46,11 +47,15 @@ class BotnetDataset(Dataset):
             'p2p': 'https://zenodo.org/record/3689089/files/botnet_p2p.tar.gz'}
 
     def __init__(self, name='chord', root='data/botnet', split='train', graph_format='pyg', split_idx=None, add_nfeat_ones=True,
-                 in_memory=True, partial_load=None):
+                 in_memory=True, partial_load=None, add_features_dgl=-1):
         super().__init__()
-        assert name in ['chord', 'debru', 'kadem', 'leet', 'c2', 'p2p']
-        assert split in ['train', 'val', 'test']
-        assert graph_format in ['pyg', 'dgl', 'nx', 'dict']
+        assert name in ['chord', 'debru', 'kadem',
+                        'leet', 'c2', 'p2p'], "Invalid dataset"
+        assert split in ['train', 'val', 'test'], "Invalid split"
+        assert graph_format in ['pyg', 'dgl', 'nx', 'dict'], "Invalid format"
+
+        if add_features_dgl > 0 and graph_format != 'dgl':
+            raise ValueError("Adding node features implemented only for DGL") 
 
         if isinstance(root, str):
             root = osp.expanduser(osp.normpath(root))
@@ -62,6 +67,7 @@ class BotnetDataset(Dataset):
         self.split_idx = split_idx
         self.add_nfeat_ones = add_nfeat_ones
         self.partial_load = partial_load
+        self.add_features_dgl = add_features_dgl
 
         self.download()
 
@@ -86,13 +92,13 @@ class BotnetDataset(Dataset):
                     "num_graphs", "ori_graph_ids"
                 ]
                 def mapper(x): return "/" + x
+                # First data, then misc columns
                 cols = list(map(mapper, self.partial_load)) + \
                     list(map(mapper, cols))
                 data = dd.io.load(self.path, group=cols)  # dictionary
                 self.data = {c[1:]: d for (c, d) in zip(cols, data)}
                 self.data['num_graphs'] = len(self.partial_load)
             self.num_graphs = self.data['num_graphs']
-
         else:
             # self.data = h5py.File(self.path, 'r')
             self.data = None    # defer opening file in each process to make multiprocessing work
@@ -219,8 +225,6 @@ class BotnetDataset(Dataset):
             if self.partial_load is None:
                 graph_dict = self.data[str(index)]
             else:
-                print(self.data)
-                print(self.partial_load[index])
                 graph_dict = self.data[str(self.partial_load[index])]
         elif self.data_type == 'file':
             if self.data is None:
@@ -233,7 +237,14 @@ class BotnetDataset(Dataset):
         if self.graph_format == 'pyg':
             return build_graph_from_dict_pyg(graph_dict)
         elif self.graph_format == 'dgl':
-            return build_graph_from_dict_dgl(graph_dict)
+            graph = build_graph_from_dict_dgl(graph_dict)
+
+            # Add features, if requested
+            if self.add_features_dgl > 0:
+                features = ch.ones(graph.num_nodes(), self.add_features_dgl,)
+                graph.ndata['feat'] = features
+            return graph
+
         elif self.graph_format == 'nx':
             return build_graph_from_dict_nx(graph_dict)
         elif self.graph_format == 'dict':
