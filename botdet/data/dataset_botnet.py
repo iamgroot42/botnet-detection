@@ -22,7 +22,7 @@ class BotnetDataset(Dataset):
     """
     Botnet detection graph dataset, containing different botnet topologies and train/val/test splits.
     The graphs are stored in HDF5 files.
-    
+
     Args:
         name (str): name of the botnet topology; choosing from ['chord', 'debru', 'kadem', 'leet', 'c2', 'p2p'].
         root (str): path of the root directory to download and store the botnet data.
@@ -34,6 +34,7 @@ class BotnetDataset(Dataset):
         add_nfeat_ones (bool, optional): whether to add blank node feature of ones in the dataset in the preprocessing, as input
             node features for the graph neural network models. Default: True.
         in_memory (bool, optional): whether to read all the graphs into memory; if not directly read from hard drive. Default: True.
+        partial_load (list, optional): list of fields to load while opening hdf5 file
     """
 
     # dataset home page at https://zenodo.org/record/3689089
@@ -45,7 +46,7 @@ class BotnetDataset(Dataset):
             'p2p': 'https://zenodo.org/record/3689089/files/botnet_p2p.tar.gz'}
 
     def __init__(self, name='chord', root='data/botnet', split='train', graph_format='pyg', split_idx=None, add_nfeat_ones=True,
-                 in_memory=True):
+                 in_memory=True, partial_load=None):
         super().__init__()
         assert name in ['chord', 'debru', 'kadem', 'leet', 'c2', 'p2p']
         assert split in ['train', 'val', 'test']
@@ -60,6 +61,7 @@ class BotnetDataset(Dataset):
         self.split = split
         self.split_idx = split_idx
         self.add_nfeat_ones = add_nfeat_ones
+        self.partial_load = partial_load
 
         self.download()
 
@@ -75,9 +77,22 @@ class BotnetDataset(Dataset):
             self.path = self.processed_paths[2]
 
         if in_memory:
-            self.data = dd.io.load(self.path)  # dictionary
             self.data_type = 'dict'
+            if self.partial_load is None:
+                self.data = dd.io.load(self.path)  # dictionary
+            else:
+                cols = [
+                    "contains_self_loops", "is_directed",
+                    "num_graphs", "ori_graph_ids"
+                ]
+                def mapper(x): return "/" + x
+                cols = list(map(mapper, self.partial_load)) + \
+                    list(map(mapper, cols))
+                data = dd.io.load(self.path, group=cols)  # dictionary
+                self.data = {c[1:]: d for (c, d) in zip(cols, data)}
+                self.data['num_graphs'] = len(self.partial_load)
             self.num_graphs = self.data['num_graphs']
+
         else:
             # self.data = h5py.File(self.path, 'r')
             self.data = None    # defer opening file in each process to make multiprocessing work
@@ -201,7 +216,12 @@ class BotnetDataset(Dataset):
 
     def __getitem__(self, index):
         if self.data_type == 'dict':
-            graph_dict = self.data[str(index)]
+            if self.partial_load is None:
+                graph_dict = self.data[str(index)]
+            else:
+                print(self.data)
+                print(self.partial_load[index])
+                graph_dict = self.data[str(self.partial_load[index])]
         elif self.data_type == 'file':
             if self.data is None:
                 # only open once in each process

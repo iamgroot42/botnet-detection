@@ -17,7 +17,7 @@ DESCRIPTION = 'Topological botnet detection datasets with graph neural network a
 URL = 'https://github.com/harvardnlp/botnet-detection'
 EMAIL = 'jzhou02@g.harvard.edu'
 AUTHOR = 'Jiawei Zhou'
-REQUIRES_PYTHON = '>=3.7.0'
+REQUIRES_PYTHON = '>=3.6.1'
 VERSION = '0.1.0'
 
 # What packages are required for this module to be executed?
