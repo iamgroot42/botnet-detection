@@ -1,12 +1,13 @@
+import modin.pandas as pd
+import swifter # Do not remove - this modified bindings for modin
 import sys, os
-import pandas as pd
 import datetime
 import csv
 import random
 import h5py
 import numpy as np
 import ipaddress
-import datetime as datatime
+import datetime as datetime
 
 
 def write_single_graph(f, graph_id, x, edge_index, y, attrs=None, **kwargs):
@@ -45,29 +46,38 @@ def search_dict(IP, IP_dict):
     return IP_dict[IP]
 
 
-def prepare_background_(f, start_time, stop_time):
+def prepare_background_(f, start_time, stop_time, NPARTS=30):
     #read data
     df = pd.read_csv(f, sep = '@')#, nrows = 10000)#
     df.columns = ["time", "srcIP", "dstIP"]
 
-    # time-filtering not needed, since each file anyway
     # contains per-minute logs
     #filter time
-    # start_time_formated = datetime.datetime.strptime(start_time, "%Y%m%d%H%M%S")
-    # stop_time_formated = datetime.datetime.strptime(stop_time, "%Y%m%d%H%M%S")
-    df['time'] = df['time'].apply(lambda x: datetime.datetime.strptime(x[:21], "%b %d, %Y %H:%M:%S"))
-    # df = df[ df.time >= start_time_formated]
-    # df = df[ df.time < stop_time_formated]
+    df['time'] = df['time'].swifter.set_npartitions(NPARTS).apply(lambda x: datetime.datetime.strptime(x[:21], "%b %d, %Y %H:%M:%S"))
+
+    if start_time is not None:
+        start_time_formated = datetime.datetime.strptime(start_time, "%Y%m%d%H%M%S")
+        df = df[ df.time >= start_time_formated]
+    
+    if stop_time is not None:
+        stop_time_formated = datetime.datetime.strptime(stop_time, "%Y%m%d%H%M%S")
+        df = df[ df.time < stop_time_formated]
 
     #transform time and IP address into formal type
-    df["srcIP"] = df["srcIP"].apply(ip2int)
-    df["dstIP"] = df["dstIP"].apply(ip2int)
+    df["srcIP"] = df["srcIP"].swifter.set_npartitions(NPARTS).apply(ip2int)
+    df["dstIP"] = df["dstIP"].swifter.set_npartitions(NPARTS).apply(ip2int)
     
     #aggregate nodes, build dictionary
-    df['srcIP'] = df['srcIP'].apply(lambda x: x >> 8)#
-    df['dstIP'] = df['dstIP'].apply(lambda x: x >> 8)#
+    df['srcIP'] = df['srcIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 8)#
+    df['dstIP'] = df['dstIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 8)#
+
+    # Drop time column and get rid of duplicates
+    # Convert to pandas to drop (faster)
+    df = df._to_pandas()
+    df = df.drop(columns=['time'])
     df = df.drop_duplicates()
     
+    # shared dictionary, using across threads will mess it up
     #renumber into 0, 1, 2, ..
     IP_dict = {}
     df["srcIP"] = df["srcIP"].apply(lambda x : search_dict(x, IP_dict))
