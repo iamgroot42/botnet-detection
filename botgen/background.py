@@ -67,9 +67,9 @@ def prepare_background_(f, start_time, stop_time, NPARTS=30):
     df["srcIP"] = df["srcIP"].swifter.set_npartitions(NPARTS).apply(ip2int)
     df["dstIP"] = df["dstIP"].swifter.set_npartitions(NPARTS).apply(ip2int)
     
-    #aggregate nodes, build dictionary
-    df['srcIP'] = df['srcIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 8)#
-    df['dstIP'] = df['dstIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 8)#
+    #aggregate nodes according to /20, build dictionary
+    df['srcIP'] = df['srcIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 12)
+    df['dstIP'] = df['dstIP'].swifter.set_npartitions(NPARTS).apply(lambda x: x >> 12)
 
     # Drop time column and get rid of duplicates
     # Convert to pandas to drop (faster)
@@ -86,9 +86,6 @@ def prepare_background_(f, start_time, stop_time, NPARTS=30):
     #write into h5py files
     num_nodes = len(IP_dict)
     num_edges = df.shape[0]
-
-    # # temp: print info
-    # print("%d nodes | %d edges" % (num_nodes, num_edges))
 
     edge_index = np.array(df[["srcIP", "dstIP"]]).T
 
